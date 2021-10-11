@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/MIDIMap"/>
+    <qresource prefix="/exe">
+        <file>MIDIMap.exe</file>
+    </qresource>
+</RCC>
