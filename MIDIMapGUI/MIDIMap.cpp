@@ -269,6 +269,7 @@ void MIDIMap::RunMIDIMap() {
 	lpExecInfo.hInstApp = NULL;
 	ShellExecuteEx(&lpExecInfo);
 
+	//Change the Run botton to Stop, and link it to the Stop function
 	ui.pbRun->setText("Stop");
 	QObject::disconnect(ui.pbRun, SIGNAL(clicked()), this, SLOT(RunMIDIMap()));
 	QObject::connect(ui.pbRun, SIGNAL(clicked()), this, SLOT(StopMIDIMap()));
@@ -278,7 +279,10 @@ void MIDIMap::RunMIDIMap() {
 
 void MIDIMap::StopMIDIMap() {
 
+	//Terminate MIDIMap process
 	TerminateProcess(lpExecInfo.hProcess, 0);
+
+	//Change the Stop button to Run, and link it to the Run function
 	ui.pbRun->setText("Run");
 	QObject::disconnect(ui.pbRun, SIGNAL(clicked()), this, SLOT(StopMIDIMap()));
 	QObject::connect(ui.pbRun, SIGNAL(clicked()), this, SLOT(RunMIDIMap()));
