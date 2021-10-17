@@ -30,6 +30,10 @@ MIDIMap::MIDIMap(QWidget *parent)
 
 	//refresh midi devices at launching
 	GetMidiDevice();
+
+	//disable window zoom and maxmizing
+	setWindowFlags(windowFlags()&~Qt::WindowMaximizeButtonHint);
+	setFixedSize(this->width(), this->height());
 }
 
 
@@ -292,6 +296,8 @@ void MIDIMap::StopMIDIMap() {
 
 void MIDIMap::RemoveMap() {
 
+
+	qDebug() << ui.listWidget->count();
 	if (ui.listWidget->count() == 0) {
 		MessageBox(NULL, L"There is nothing to remove.", L"Error", NULL);
 	}

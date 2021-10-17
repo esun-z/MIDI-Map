@@ -4,6 +4,11 @@ using namespace std;
 
 #define MAX_KEYMAP 128
 
+#define MOUSERIGHTSTOP 0
+#define MOUSEUPSTOP 1
+#define MOUSELEFTSTOP 2
+#define MOUSEDOWNSTOP 3
+
 #define KeyDown(VK_NONAME) ((GetAsyncKeyState(VK_NONAME) & 0x8000) ? 1:0)
 #define TryCatch(SOMETHING) try{SOMETHING;}catch(RtMidiError &error){error.printMessage();}
 
@@ -14,21 +19,73 @@ struct KEYMAP {
 	int key[4];
 };
 
+struct MOUSEMAP {
+	bool midiIgnore[3];
+	int midi[3];
+	int direct;
+	int sensitivity;//better in a resonable range, meaning how far(ScreenHeightOrWidth/65536) to move when reciving a single signal.
+};
+
 struct SETTING {
 	bool available = true;
 	string nameMidiIn;
 	int numKeyMap;
 	KEYMAP map[MAX_KEYMAP];
+	MOUSEMAP mouse[4];
+	int mouseMapAvailable;
 };
+
+
 
 SETTING setting;
 
 bool stateKey[MAX_KEYMAP];
+bool stateMouseMove[4] = {0,0,0,0};
+bool signalMouseMoveThreadExit = false;
+
 
 //temp values
 int type, tmp;
 int channel, key, dynamic;
 bool flag;
+
+void HandleMouseMove(RECT screenRect) {
+	double x, y;
+	double sx = (double)1024 / (screenRect.right - screenRect.left);
+	double sy = (double)1024 / (screenRect.bottom - screenRect.top);
+	POINT mousePoint;
+	while (1) {
+
+		GetCursorPos(&mousePoint);
+		x = mousePoint.x;
+		y = mousePoint.y;
+
+		if (stateMouseMove[MOUSELEFTSTOP]) {
+			x -= (double)setting.mouse[MOUSELEFTSTOP].sensitivity*sx;
+			x--;
+		}
+		if (stateMouseMove[MOUSEUPSTOP]) {
+			y -= (double)setting.mouse[MOUSEUPSTOP].sensitivity*sy;
+			y--;
+		}
+		if (stateMouseMove[MOUSERIGHTSTOP]) {
+			x += (double)setting.mouse[MOUSERIGHTSTOP].sensitivity*sx;
+			x++;
+		}
+		if (stateMouseMove[MOUSEDOWNSTOP]) {
+			y += (double)setting.mouse[MOUSEDOWNSTOP].sensitivity*sy;
+			y++;
+		}
+		SetCursorPos(x, y);
+
+		if (signalMouseMoveThreadExit) {
+			break;
+		}
+		Sleep(10);
+	}
+
+	return;
+}
 
 
 void HandleMessage(vector< unsigned char > *message) {
@@ -47,25 +104,72 @@ void HandleMessage(vector< unsigned char > *message) {
 					}
 				}
 			}
-			if (setting.map[i].midiIgnore[j * 3 + 2]) {
-				if (setting.map[i].midi[j * 3 + 2] > (int)message->at(j * 3 + 2)) {
+			if (setting.map[i].midiIgnore[2]) {
+				if (setting.map[i].midi[2] > (int)message->at(j * 3 + 2)) {
 					flag = false;
 				}
 			}
 			if (flag) {
 				if (dynamic == 0) {
 					for (int k = 0; k < setting.map[i].numKey; ++k) {
-						keybd_event(setting.map[i].key[k], MapVirtualKey(setting.map[i].key[k], 0), KEYEVENTF_KEYUP, 0);
+						if (setting.map[i].key[k] == 1) {
+							mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+						}
+						else if (setting.map[i].key[k] == 2) {
+							mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0);
+						}
+						else {
+							keybd_event(setting.map[i].key[k], MapVirtualKey(setting.map[i].key[k], 0), KEYEVENTF_KEYUP, 0);
+						}
 						cout << "\nKey Up: " << setting.map[i].key[k] << "\n";
 					}
 				}
 				else {
 					for (int k = 0; k < setting.map[i].numKey; ++k) {
-						keybd_event(setting.map[i].key[k], MapVirtualKey(setting.map[i].key[k], 0), 0, 0);
+						if (setting.map[i].key[k] == 1) {
+							mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+						}
+						else if (setting.map[i].key[k] == 2) {
+							mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0);
+						}
+						else {
+							keybd_event(setting.map[i].key[k], MapVirtualKey(setting.map[i].key[k], 0), 0, 0);
+						}
 						cout << "\nKey Down: " << setting.map[i].key[k] << "\n";
 					}
 				}
 				
+			}
+		}
+
+		if (setting.mouseMapAvailable) {
+			
+			for (int i = 0; i < 4; ++i) {
+				flag = true;
+				for (int k = 0; k < 2; ++k) {
+					if (setting.mouse[i].midiIgnore) {
+						if (setting.mouse[i].midi[k] != (int)message->at(j * 3 + k)) {
+							flag = false;
+							break;
+						}
+					}
+				}
+				if (setting.mouse[i].midiIgnore[2]) {
+					if (setting.mouse[i].midi[2] > dynamic) {
+						flag = false;
+					}
+				}
+				if (flag) {
+					if (dynamic == 0) {
+						stateMouseMove[i] = false;
+						cout << "\nMouse Stop: " << i << endl;
+
+					}
+					else {
+						stateMouseMove[i] = true;
+						cout << "\nMouse Move: " << i << endl;
+					}
+				}
 			}
 		}
 	}
@@ -74,6 +178,7 @@ void HandleMessage(vector< unsigned char > *message) {
 	return;
 }
 
+//RtMIDI CallBack function, to display messages and send them to HandleMessage
 void RtmCallBack(double timeStamp, vector< unsigned char > *message, void *userData) {
 	unsigned int nBytes = message->size();
 	cout << "\nMIDI Message\n";
@@ -102,6 +207,7 @@ void RtmCallBack(double timeStamp, vector< unsigned char > *message, void *userD
 	HandleMessage(message);
 }
 
+// main MIDI listening loop
 void ListenMidi(SETTING set) {
 
 	string::size_type idx;
@@ -138,17 +244,26 @@ void ListenMidi(SETTING set) {
 	TryCatch(RtmIn->openPort(seqRtmIn));
 	RtmIn->setCallback(RtmCallBack);
 
+	
 	while (1) {
-		if (KeyDown(VK_ESCAPE)) {
+		
+		if (KeyDown(VK_ESCAPE) && KeyDown(VK_RETURN)) {
 			cout << "\nQuiting" << endl;
 			break;
 		}
+		
 		Sleep(1);
 	}
+	
 
 	return;
 }
 
+bool Cmp(MOUSEMAP a, MOUSEMAP b) {
+	return a.direct < b.direct;
+}
+
+//read a setting from config.cfg
 SETTING ReadSetting(char *nameFile) {
 
 	SETTING set;
@@ -161,8 +276,8 @@ SETTING ReadSetting(char *nameFile) {
 		return set;
 	}
 	
-
-	inFile >> set.nameMidiIn >> set.numKeyMap;
+	getline(inFile, set.nameMidiIn);
+	inFile >> set.numKeyMap;
 
 	set.numKeyMap = min(set.numKeyMap, MAX_KEYMAP);
 
@@ -179,10 +294,28 @@ SETTING ReadSetting(char *nameFile) {
 		}
 	}
 
+	inFile >> set.mouseMapAvailable;
+	if (set.mouseMapAvailable == 1) {
+		for (int i = 0; i < 4; ++i) {
+			for (int j = 0; j < 3; ++j) {
+				inFile >> set.mouse[i].midiIgnore[j];
+			}
+			for (int j = 0; j < 3; ++j) {
+				inFile >> set.mouse[i].midi[j];
+			}
+			inFile >> set.mouse[i].direct;
+			inFile >> set.mouse[i].sensitivity;
+		}
+
+		sort(set.mouse, set.mouse + 4, Cmp);
+	}
+	else {
+		set.mouseMapAvailable = 0;
+	}
+
 	inFile.close();
 
 	return set;
-
 }
 
 void PrintSetting(SETTING set) {
@@ -207,6 +340,24 @@ void PrintSetting(SETTING set) {
 		}
 		cout << "\n\n";
 	}
+	if (setting.mouseMapAvailable == 1) {
+		cout << "Mouse Move Available.\n";
+		for (int i = 0; i < 4; ++i) {
+			cout << "Direct #" << i << ":\n";
+			cout << "Map#" << i << ":\n";
+			cout << "MIDI input: ";
+			for (int j = 0; j < 3; ++j) {
+				if (set.mouse[i].midiIgnore[j] == 0) {
+					cout << "NL	";
+				}
+				else {
+					cout << set.mouse[i].midi[j] << "	";
+				}
+			}
+			cout << "\n";
+			cout << "Sensitivity = " << set.mouse[i].sensitivity << "\n";
+		}
+	}
 
 	return;
 }
@@ -218,15 +369,21 @@ int main() {
 	
 	setting = ReadSetting("config.cfg");
 	PrintSetting(setting);
-
+	HWND desktopHwnd = GetDesktopWindow();
+	RECT scrRect;
+	GetWindowRect(desktopHwnd,&scrRect);
 	if (setting.available) {
+		thread mouseThread(HandleMouseMove, scrRect);
 		ListenMidi(setting);
 	}
 	else {
+		cout << "Error. Exiting..." << endl;
 		return 0;
 	}
 	
-	_getch();
+	
+	signalMouseMoveThreadExit = true;
+	Sleep(20);
 
 	return 0;
 }
